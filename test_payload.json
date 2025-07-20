@@ -1,0 +1,14 @@
+{
+    "age": 33,
+    "education_num": 16,
+    "hours_per_week": 60,
+    "workclass_Private": 1,
+    "education_Masters": 1,
+    "marital_status_Married_civ_spouse": 1,
+    "occupation_Exec_managerial": 1,
+    "relationship_Husband": 1,
+    "race_White": 1,
+    "sex_Male": 1,
+    "native_country_United_States": 1
+  }
+  
