@@ -1,6 +1,10 @@
 flask
+gunicorn
 pandas
+numpy
 scikit-learn
-joblib
 xgboost
-gunicorn 
+joblib
+shap
+requests
+python-dotenv
