@@ -5,14 +5,19 @@ venv_income_api/
 __pycache__/
 *.py[cod]
 *.so
+venv_income_api/
 
 # Jupyter Notebook checkpoints
 .ipynb_checkpoints/
 
-# Environment files
+# Ignore environment/IDE files
+.vscode/
 .env
-*.env
 
 # OS-specific files
 .DS_Store
 Thumbs.db
+
+# Ignore model artifacts if necessary
+*.pkl
+*.joblib
