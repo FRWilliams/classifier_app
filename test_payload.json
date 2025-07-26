@@ -1,14 +1,16 @@
 {
-    "age": 33,
-    "education_num": 16,
-    "hours_per_week": 60,
-    "workclass_Private": 1,
-    "education_Masters": 1,
-    "marital_status_Married_civ_spouse": 1,
-    "occupation_Exec_managerial": 1,
-    "relationship_Husband": 1,
-    "race_White": 1,
-    "sex_Male": 1,
-    "native_country_United_States": 1
-  }
-  
+  "age": 37,
+  "workclass": "Private",
+  "fnlwgt": 284582,
+  "education": "Bachelors",
+  "education_num": 13,
+  "marital_status": "Married-civ-spouse",
+  "occupation": "Exec-managerial",
+  "relationship": "Husband",
+  "race": "White",
+  "sex": "Male",
+  "capital_gain": 0,
+  "capital_loss": 0,
+  "hours_per_week": 45,
+  "native_country": "United-States"
+}
