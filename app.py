@@ -11,27 +11,27 @@ model = joblib.load("model\income_model.pkl")
 @app.route("/predict", methods=["POST"])
 def predict():
     try:
-        # Parse incoming JSON payload
         payload = request.get_json(force=True)
-
         if not payload:
             raise ValueError("Empty or invalid input payload.")
 
-        # Convert to DataFrame and preprocess
         input_df = pd.DataFrame([payload])
         processed_df = preprocess_data(input_df)
 
-        # Run prediction
-        prediction = model.predict(processed_df)[0]
+        # Predict class and confidence
+        predicted_class = model.predict(processed_df)[0]
+        proba = model.predict_proba(processed_df)[0]
 
-        # Convert prediction to readable label
         label_map = {0: "Income ≤ 50K", 1: "Income > 50K"}
-        readable_output = label_map.get(int(prediction), "Unknown")
+        readable_output = label_map.get(int(predicted_class), "Unknown")
+        confidence_score = round(float(proba[int(predicted_class)]) * 100, 2)
 
-        return jsonify({"prediction": readable_output})
+        return jsonify({
+            "prediction": readable_output,
+            "confidence_percent": f"{confidence_score}%"
+        })
+
     except Exception as e:
         return jsonify({"error": str(e)}), 400
-
 if __name__ == "__main__":
-    app.run(debug=True)
-
+    app.run(port=5000)
