@@ -11,14 +11,12 @@ def preprocess_data(df):
     citizenship_map = {1: "Born in US", 2: "Born in Territory", 3: "Born abroad to US parents", 4: "Naturalized", 5: "Not a citizen"}
     class_of_worker_map = {0: "Not Applicable", 1: "Private for-profit", 2: "Private nonprofit", 3: "Local government", 4: "State government", 5: "Self-employed"}
     sex_map = {1: "Male", 2: "Female"}
-    education_map = {
-        0: "N/A", 1: "No schooling", 2: "Pre-K to Grade 4", 3: "Pre-K to Grade 4", 4: "Pre-K to Grade 4",
-        5: "Pre-K to Grade 4", 6: "Grade 5-8", 7: "Grade 5-8", 8: "Grade 5-8", 9: "Grade 5-8",
-        10: "Grade 9-12 (no diploma)", 11: "Grade 9-12 (no diploma)", 12: "Grade 9-12 (no diploma)",
-        13: "Grade 9-12 (no diploma)", 14: "Grade 9-12 (no diploma)", 15: "Grade 9-12 (no diploma)",
-        16: "High School Graduate", 17: "High School Graduate", 18: "Some College", 19: "Some College",
-        20: "Associate's", 21: "Bachelor's", 22: "Graduate Degree", 23: "Graduate Degree"
-    }
+    education_map = {0: "N/A", 1: "No schooling", 2: "Pre-K to Grade 4", 3: "Pre-K to Grade 4", 4: "Pre-K to Grade 4",
+                    5: "Pre-K to Grade 4", 6: "Pre-K to Grade 4", 7: "Pre-K to Grade 4", 8: "Grade 5-8", 9: "Grade 5-8",
+                    10: "Grade 5-8", 11: "Grade 5-8", 12: "Grade 9-12 (no diploma)", 13: "Grade 9-12 (no diploma)",
+                    14: "Grade 9-12 (no diploma)", 15: "Grade 9-12 (no diploma)", 16: "High School Graduate", 17: "High School Graduate",
+                    18: "Some College", 19: "Some College", 20: "Associate's", 21: "Bachelor's", 22: "Graduate Degree",
+                    23: "Graduate Degree"}                    
     race_map = {1: "White", 2: "Black", 3: "American Indian", 4: "Alaska Native", 5: "Tribes Specified", 6: "Asian", 7: "Pacific Islander", 8: "Other", 9: "Two or More Races"}
     tenure_map = {0: "N/A", 1: "Owned with mortgage or loan (include home equity loans)", 2: "Owned Free And Clear", 3: "Rented", 4: "Occupied without payment of rent"}
     building_map = {0: "N/A", 1: "Mobile Home or Trailer", 2: "One-family house detached", 3: "One-family house attached",
