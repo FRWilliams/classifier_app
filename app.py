@@ -7,7 +7,7 @@ import numpy as np
 import joblib
 import json
 
-# Make sure the module name used in the pickle exists at import time
+# Ensure the module name used in the pickle exists at import time
 import preprocessing  # registers preprocessing.mapping_impute for unpickling
 
 try:
@@ -15,7 +15,6 @@ try:
 except Exception:
     cp = None
 
-# Optional: allow calling API from a browser app on another origin
 # from flask_cors import CORS
 
 app = Flask(__name__)
@@ -39,9 +38,7 @@ last_load_error = None
 decision_threshold = None
 
 def ensure_model_file():
-    """
-    Ensure income_pipeline.pkl exists; if not, try downloading it from MODEL_URL.
-    """
+    """Ensure income_pipeline.pkl exists; if not, try downloading it from MODEL_URL."""
     if PIPE_PATH.exists():
         return
     url = os.getenv("MODEL_URL")
@@ -59,9 +56,7 @@ def ensure_model_file():
     tmp.replace(PIPE_PATH)
 
 def load_threshold():
-    """
-    Load decision threshold from file or env; fallback to 0.5.
-    """
+    """Load decision threshold from file or env; fallback to 0.5."""
     env_thr = os.getenv("THRESHOLD")
     if env_thr:
         try:
@@ -77,15 +72,12 @@ def load_threshold():
     return 0.5
 
 def get_pipeline():
-    """
-    Load the trained pipeline (first time only). Captures any load error.
-    """
+    """Load the trained pipeline (first time only). Captures any load error."""
     global pipeline, last_load_error, decision_threshold
     if pipeline is not None:
         return pipeline
     try:
         ensure_model_file()
-        # First, try joblib
         pipeline = joblib.load(PIPE_PATH)
         last_load_error = None
     except Exception as e1:
@@ -102,7 +94,6 @@ def get_pipeline():
             pipeline = None
             last_load_error = repr(e1)
             raise
-    # Threshold (defer until after successful load)
     decision_threshold = load_threshold()
     return pipeline
 
@@ -118,7 +109,8 @@ def home():
     return (
         "<h2>Income Classifier API</h2>"
         "<p>GET <code>/health</code> for model status.</p>"
-        "<p>POST <code>/predict</code> with JSON (single object or list of objects).</p>",
+        "<p>POST <code>/predict</code> with JSON (single object or list of objects).</p>"
+        "<p>Or use <code>/upload</code> (form) to send a JSON file.</p>",
         200,
     )
 
@@ -199,6 +191,7 @@ def predict():
             "threshold_used": thr,
         })
     return jsonify(results), 200
+
 @app.route("/upload", methods=["GET", "POST"])
 def upload():
     if request.method == "POST":
@@ -206,50 +199,62 @@ def upload():
         if not file:
             return "No file uploaded", 400
 
+        # Parse uploaded JSON file (decode bytes → str → json)
         try:
-            payload = json.load(file)
+            payload = json.loads(file.read().decode("utf-8"))
         except Exception:
             return "Invalid JSON format", 400
 
         # Normalize → DataFrame
         if isinstance(payload, dict):
-            df = pd.DataFrame([payload])
+            df = pd.DataFrame([payload]); single = True
         elif isinstance(payload, list) and all(isinstance(x, dict) for x in payload):
-            df = pd.DataFrame(payload)
+            df = pd.DataFrame(payload); single = False
         else:
             return "Payload must be a JSON object or a list of JSON objects.", 400
-        
+
         # Validate required columns
-        missing = [c for c in REQUIRED_COLUMNS if c not in payload.columns]
+        missing = [c for c in REQUIRED_COLUMNS if c not in df.columns]
         if missing:
             return f"Missing required keys: {missing}", 400
 
+        # Coerce numerics
         for c in NUMERIC_COLUMNS:
-            if c in payload.columns:
-                payload[c] = pd.to_numeric(payload[c], errors="coerce")
+            if c in df.columns:
+                df[c] = pd.to_numeric(df[c], errors="coerce")
 
+        # Predict (reuse the same pipeline and threshold)
         try:
             pl = get_pipeline()
-            probs = pl.predict_proba(payload)[:, 1]
-            threshold = 0.6648
-            preds = (probs >= threshold).astype(int)
+            probs = pl.predict_proba(df)[:, 1]
+            thr = decision_threshold if decision_threshold is not None else 0.5
+            preds = (probs >= thr).astype(int)
         except Exception as e:
             return f"Inference failed: {e}", 500
 
         label_map = {0: "Income ≤ 50K", 1: "Income > 50K"}
+
+        if single:
+            conf = float(probs[0]) if preds[0] == 1 else float(1 - probs[0])
+            return jsonify({
+                "prediction": label_map.get(int(preds[0]), str(int(preds[0]))),
+                "probability_income_gt_50k": float(probs[0]),
+                "confidence_percent": round(conf * 100, 2),
+                "threshold_used": thr,
+            }), 200
+
         results = []
         for p, pr in zip(preds, probs):
-            conf = pr if p == 1 else 1 - pr
+            conf = float(pr) if p == 1 else float(1 - pr)
             results.append({
                 "prediction": label_map.get(int(p), str(int(p))),
-                "probability_income_gt_50k": round(pr, 4),
+                "probability_income_gt_50k": float(pr),
                 "confidence_percent": round(conf * 100, 2),
-                "threshold_used": threshold
+                "threshold_used": thr,
             })
+        return jsonify(results), 200
 
-        return jsonify(results)
-
-    # GET request: show upload form
+    # GET request: simple upload form
     return '''
         <h2>Upload JSON File for Prediction</h2>
         <form method="POST" enctype="multipart/form-data">
@@ -257,7 +262,6 @@ def upload():
             <input type="submit" value="Predict">
         </form>
     '''
-
 
 if __name__ == "__main__":
     # 0.0.0.0 is required on Render
