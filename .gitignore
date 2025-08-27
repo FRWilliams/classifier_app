@@ -1,27 +1,37 @@
-# Ignore Python virtual environment
+# Virtual environments
+.venv/
+venv/
+env/
 venv_income_api/
 
-# Byte-compiled / cache files
+# Byte-compiled / caches
 __pycache__/
 *.py[cod]
-*.so
-venv_income_api/
+*.pyo
+*.pyd
 
-# Jupyter Notebook checkpoints
+# Jupyter
 .ipynb_checkpoints/
 
-# Ignore environment/IDE files
+# IDE/OS
 .vscode/
-.env
-
-# OS-specific files
+.idea/
 .DS_Store
 Thumbs.db
 
-# Ignore model artifacts if necessary
+# Secrets
+.env
+.env.*
+
+# Build / metadata
+*.so
+**/*.dist-info/
+**/*.egg-info/
+dist/
+build/
+.eggs/
+
+# Model artifacts
 *.pkl
 *.joblib
 
-# Python package metadata
-**/*.dist-info/
-**/*.egg-info/
