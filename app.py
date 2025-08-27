@@ -198,6 +198,57 @@ def predict():
             "threshold_used": thr,
         })
     return jsonify(results), 200
+@app.route("/upload", methods=["GET", "POST"])
+def upload():
+    if request.method == "POST":
+        file = request.files.get("file")
+        if not file:
+            return "No file uploaded", 400
+
+        try:
+            payload = pd.read_json(file)
+        except Exception:
+            return "Invalid JSON format", 400
+
+        # Validate required columns
+        missing = [c for c in REQUIRED_COLUMNS if c not in payload.columns]
+        if missing:
+            return f"Missing required keys: {missing}", 400
+
+        for c in NUMERIC_COLUMNS:
+            if c in payload.columns:
+                payload[c] = pd.to_numeric(payload[c], errors="coerce")
+
+        try:
+            pl = get_pipeline()
+            probs = pl.predict_proba(payload)[:, 1]
+            threshold = 0.6648
+            preds = (probs >= threshold).astype(int)
+        except Exception as e:
+            return f"Inference failed: {e}", 500
+
+        label_map = {0: "Income ≤ 50K", 1: "Income > 50K"}
+        results = []
+        for p, pr in zip(preds, probs):
+            conf = pr if p == 1 else 1 - pr
+            results.append({
+                "prediction": label_map.get(int(p), str(int(p))),
+                "probability_income_gt_50k": round(pr, 4),
+                "confidence_percent": round(conf * 100, 2),
+                "threshold_used": threshold
+            })
+
+        return jsonify(results)
+
+    # GET request: show upload form
+    return '''
+        <h2>Upload JSON File for Prediction</h2>
+        <form method="POST" enctype="multipart/form-data">
+            <input type="file" name="file" accept=".json">
+            <input type="submit" value="Predict">
+        </form>
+    '''
+
 
 if __name__ == "__main__":
     # 0.0.0.0 is required on Render
