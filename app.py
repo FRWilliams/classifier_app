@@ -5,6 +5,7 @@ import os
 import pandas as pd
 import numpy as np
 import joblib
+import json
 
 # Make sure the module name used in the pickle exists at import time
 import preprocessing  # registers preprocessing.mapping_impute for unpickling
