@@ -21,3 +21,7 @@ Thumbs.db
 # Ignore model artifacts if necessary
 *.pkl
 *.joblib
+
+# Python package metadata
+**/*.dist-info/
+**/*.egg-info/
