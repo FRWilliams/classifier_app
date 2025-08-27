@@ -1,61 +1,123 @@
 # app.py
 from flask import Flask, request, jsonify
 from pathlib import Path
+import os
 import pandas as pd
 import numpy as np
 import joblib
-from preprocessing import mapping_impute  # ✅ Modular import
 
-print(">>> APP STARTED, loading model…")
+# Make sure the module name used in the pickle exists at import time
+import preprocessing  # registers preprocessing.mapping_impute for unpickling
+
+try:
+    import cloudpickle as cp  # optional fallback
+except Exception:
+    cp = None
+
+# Optional: allow calling API from a browser app on another origin
+# from flask_cors import CORS
 
 app = Flask(__name__)
+# CORS(app)
 
-# --- Ensure UTF-8 in JSON responses (so "≤" renders, not \u2264) ---
+# --- Ensure UTF-8 in JSON ---
 try:
-    app.json.ensure_ascii = False
+    app.json.ensure_ascii = False  # Flask 2.3+
 except Exception:
     app.config["JSON_AS_ASCII"] = False
 
-# Required columns for validation
+# --- Paths & files ---
+BASE_DIR = Path(__file__).resolve().parent
+MODEL_DIR = BASE_DIR / "model"
+PIPE_PATH = MODEL_DIR / "income_pipeline.pkl"
+THRESHOLD_PATH = MODEL_DIR / "threshold.txt"
+
+# --- Lazy model load ---
+pipeline = None
+last_load_error = None
+decision_threshold = None
+
+def ensure_model_file():
+    """
+    Ensure income_pipeline.pkl exists; if not, try downloading it from MODEL_URL.
+    """
+    if PIPE_PATH.exists():
+        return
+    url = os.getenv("MODEL_URL")
+    if not url:
+        raise FileNotFoundError(f"Model file missing at {PIPE_PATH} and no MODEL_URL set")
+    import requests
+    MODEL_DIR.mkdir(parents=True, exist_ok=True)
+    tmp = PIPE_PATH.with_suffix(".tmp")
+    with requests.get(url, stream=True, timeout=90) as r:
+        r.raise_for_status()
+        with open(tmp, "wb") as f:
+            for chunk in r.iter_content(1 << 20):
+                if chunk:
+                    f.write(chunk)
+    tmp.replace(PIPE_PATH)
+
+def load_threshold():
+    """
+    Load decision threshold from file or env; fallback to 0.5.
+    """
+    env_thr = os.getenv("THRESHOLD")
+    if env_thr:
+        try:
+            return float(env_thr)
+        except ValueError:
+            pass
+    if THRESHOLD_PATH.exists():
+        txt = THRESHOLD_PATH.read_text().strip()
+        try:
+            return float(txt)
+        except ValueError:
+            pass
+    return 0.5
+
+def get_pipeline():
+    """
+    Load the trained pipeline (first time only). Captures any load error.
+    """
+    global pipeline, last_load_error, decision_threshold
+    if pipeline is not None:
+        return pipeline
+    try:
+        ensure_model_file()
+        # First, try joblib
+        pipeline = joblib.load(PIPE_PATH)
+        last_load_error = None
+    except Exception as e1:
+        if cp is not None:
+            try:
+                with open(PIPE_PATH, "rb") as f:
+                    pipeline = cp.load(f)
+                    last_load_error = None
+            except Exception as e2:
+                pipeline = None
+                last_load_error = f"joblib: {repr(e1)} | cloudpickle: {repr(e2)}"
+                raise
+        else:
+            pipeline = None
+            last_load_error = repr(e1)
+            raise
+    # Threshold (defer until after successful load)
+    decision_threshold = load_threshold()
+    return pipeline
+
+# --- Contracts ---
 REQUIRED_COLUMNS = [
     "TEN","RAC1P","CIT","SCHL","BLD","HUPAC","COW","MAR","SEX","VEH","WKL",
     "AGEP","NPF","GRPIP","WKHP"
 ]
 NUMERIC_COLUMNS = ["AGEP","NPF","GRPIP","WKHP"]
 
-# =============================================================================
-# Model loading (lazy) + paths
-# =============================================================================
-
-BASE_DIR = Path(__file__).resolve().parent
-PIPE_PATH = BASE_DIR / "model" / "income_pipeline.pkl"
-
-pipeline = None
-last_load_error = None
-
-def get_pipeline():
-    global pipeline, last_load_error
-    if pipeline is None:
-        try:
-            pipeline = joblib.load(PIPE_PATH)
-            last_load_error = None
-        except Exception as e:
-            pipeline = None
-            last_load_error = repr(e)
-            app.logger.exception(f"Failed to load pipeline from {PIPE_PATH}")
-            raise
-    return pipeline
-
-# =============================================================================
-# Routes
-# =============================================================================
-
 @app.route("/", methods=["GET"])
 def home():
     return (
         "<h2>Income Classifier API</h2>"
-        "<p>POST <code>/predict</code> with JSON (single object or list of objects).</p>"
-        "<p>GET <code>/health</code> for model status.</p>",
+        "<p>GET <code>/health</code> for model status.</p>"
+        "<p>POST <code>/predict</code> with JSON (single object or list of objects).</p>",
         200,
     )
 
@@ -63,17 +125,24 @@ def home():
 def health():
     try:
         get_pipeline()
-        return jsonify(status="ok", model_path=str(PIPE_PATH)), 200
+        return jsonify(status="ok",
+                       model_path=str(PIPE_PATH),
+                       threshold=decision_threshold), 200
     except Exception:
-        return jsonify(status="pipeline_not_loaded", model_path=str(PIPE_PATH), error=last_load_error), 500
+        return jsonify(status="pipeline_not_loaded",
+                       model_path=str(PIPE_PATH),
+                       error=last_load_error), 500
 
 @app.route("/predict", methods=["POST"])
 def predict():
+    # Ensure model is loaded
     try:
         pl = get_pipeline()
     except Exception:
-        return jsonify(error=f"Pipeline not loaded from {PIPE_PATH}", details=last_load_error), 500
+        return jsonify(error=f"Pipeline not loaded from {PIPE_PATH}",
+                       details=last_load_error), 500
 
+    # Parse JSON
     try:
         payload = request.get_json(force=True)
     except Exception:
@@ -82,6 +151,7 @@ def predict():
     if payload is None:
         return jsonify(error="Empty JSON payload."), 400
 
+    # Normalize → DataFrame
     if isinstance(payload, dict):
         df = pd.DataFrame([payload]); single = True
     elif isinstance(payload, list) and all(isinstance(x, dict) for x in payload):
@@ -89,30 +159,34 @@ def predict():
     else:
         return jsonify(error="Payload must be a JSON object or a list of JSON objects."), 400
 
+    # Validate keys
     missing = [c for c in REQUIRED_COLUMNS if c not in df.columns]
     if missing:
         return jsonify(error=f"Missing required keys: {missing}"), 400
 
+    # Coerce numeric columns
     for c in NUMERIC_COLUMNS:
         if c in df.columns:
             df[c] = pd.to_numeric(df[c], errors="coerce")
 
+    # Predict
     try:
         probs = pl.predict_proba(df)[:, 1]
-        threshold = 0.6648
-        preds = (probs >= threshold).astype(int)
+        thr = decision_threshold if decision_threshold is not None else 0.5
+        preds = (probs >= thr).astype(int)
     except Exception as e:
         return jsonify(error=f"Inference failed: {e}"), 500
 
     label_map = {0: "Income ≤ 50K", 1: "Income > 50K"}
+
     if single:
         conf = float(probs[0]) if preds[0] == 1 else float(1 - probs[0])
-        out = {
+        return jsonify({
             "prediction": label_map.get(int(preds[0]), str(int(preds[0]))),
             "probability_income_gt_50k": float(probs[0]),
             "confidence_percent": round(conf * 100, 2),
-        }
-        return jsonify(out), 200
+            "threshold_used": thr,
+        }), 200
 
     results = []
     for p, pr in zip(preds, probs):
@@ -121,8 +195,10 @@ def predict():
             "prediction": label_map.get(int(p), str(int(p))),
             "probability_income_gt_50k": float(pr),
             "confidence_percent": round(conf * 100, 2),
+            "threshold_used": thr,
         })
     return jsonify(results), 200
 
 if __name__ == "__main__":
-    app.run(host="127.0.0.1", port=5000, debug=False)
+    # 0.0.0.0 is required on Render
+    app.run(host="0.0.0.0", port=int(os.getenv("PORT", 5000)), debug=False)
