@@ -206,10 +206,18 @@ def upload():
             return "No file uploaded", 400
 
         try:
-            payload = pd.read_json(file)
+            payload = json.load(file)
         except Exception:
             return "Invalid JSON format", 400
 
+        # Normalize → DataFrame
+        if isinstance(payload, dict):
+            df = pd.DataFrame([payload])
+        elif isinstance(payload, list) and all(isinstance(x, dict) for x in payload):
+            df = pd.DataFrame(payload)
+        else:
+            return "Payload must be a JSON object or a list of JSON objects.", 400
+        
         # Validate required columns
         missing = [c for c in REQUIRED_COLUMNS if c not in payload.columns]
         if missing:

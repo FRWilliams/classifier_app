@@ -33,5 +33,6 @@ build/
 
 # Model artifacts
 *.pkl
+!model/income_pipeline.pkl 
 *.joblib
 
