@@ -6,14 +6,6 @@ import pandas as pd
 import numpy as np
 import joblib
 
-# IMPORTANT: ensure the symbol path used in the pickle exists
-import preprocessing  # must be importable BEFORE joblib.load()
-
-try:
-    import cloudpickle as cp  # optional fallback for notebook pickles
-except Exception:
-    cp = None
-
 print(">>> APP STARTED, loading model lazily…")
 
 app = Flask(__name__)
@@ -22,62 +14,97 @@ try:
 except Exception:
     app.config["JSON_AS_ASCII"] = False
 
+# ------------------ PREPROCESSING (as in your original) ------------------
+marital_status_map = {1: "Married", 2: "Widowed", 3: "Divorced", 4: "Separated", 5: "Never married"}
+citizenship_map    = {1: "Born in US", 2: "Born in Territory", 3: "Born abroad to US parents", 4: "Naturalized", 5: "Not a citizen"}
+class_of_worker_map= {0: "Not Applicable", 1: "Private for-profit", 2: "Private nonprofit", 3: "Local government",
+                      4: "State government", 5: "Self-employed"}
+sex_map            = {1: "Male", 2: "Female"}
+education_map      = {
+    0:"N/A",1:"No schooling",2:"Pre-K to Grade 4",3:"Pre-K to Grade 4",4:"Pre-K to Grade 4",
+    5:"Pre-K to Grade 4",6:"Pre-K to Grade 4",7:"Pre-K to Grade 4",8:"Grade 5-8",9:"Grade 5-8",
+    10:"Grade 5-8",11:"Grade 5-8",12:"Grade 9-12 (no diploma)",13:"Grade 9-12 (no diploma)",
+    14:"Grade 9-12 (no diploma)",15:"Grade 9-12 (no diploma)",16:"High School Graduate",17:"High School Graduate",
+    18:"Some College",19:"Some College",20:"Associate's",21:"Bachelor's",22:"Graduate Degree",23:"Graduate Degree"
+}
+race_map           = {1:"White",2:"Black",3:"American Indian",4:"Alaska Native",5:"Tribes Specified",
+                      6:"Asian",7:"Pacific Islander",8:"Other",9:"Two or More Races"}
+tenure_map         = {0:"N/A",1:"Owned with mortgage or loan (include home equity loans)",2:"Owned Free And Clear",
+                      3:"Rented",4:"Occupied without payment of rent"}
+building_map       = {0:"N/A",1:"Mobile Home or Trailer",2:"One-family house detached",3:"One-family house attached",
+                      4:"2 Apartments",5:"3-4 Apartments",6:"5-9 Apartments",7:"10-19 Apartments",
+                      8:"20-49 Apartments",9:"50 or More Apartments",10:"Boat, RV, van, etc."}
+children_map       = {0:"N/A",1:"With children under 6 years only",2:"With children 6 to 17 years only",
+                      3:"With children under 6 years and 6 to 17 years",4:"No children"}
+vehicle_map        = {-1:"N/A",0:"No vehicles",1:"1 vehicle",2:"2 vehicles",3:"3 vehicles",
+                      4:"4 vehicles",5:"5 vehicles",6:"6 or more vehicles"}
+
+REQUIRED_COLUMNS = ["TEN","RAC1P","CIT","SCHL","BLD","HUPAC","COW","MAR","SEX","VEH","WKL","AGEP","NPF","GRPIP","WKHP"]
+NUMERIC_COLUMNS  = ["AGEP","NPF","GRPIP","WKHP"]
+
+def _map_if_numeric(series: pd.Series, mapping: dict) -> pd.Series:
+    def _maybe_map(v):
+        try:
+            iv = int(str(v)) if str(v).isdigit() else v
+            return mapping.get(iv, mapping.get(v, v))
+        except Exception:
+            return mapping.get(v, v)
+    return series.map(_maybe_map)
+
+def mapping_impute(df: pd.DataFrame) -> pd.DataFrame:
+    X = df.copy()
+    if "MAR"   in X: X["MAR"]   = _map_if_numeric(X["MAR"],   marital_status_map)
+    if "CIT"   in X: X["CIT"]   = _map_if_numeric(X["CIT"],   citizenship_map)
+    if "COW"   in X: X["COW"]   = _map_if_numeric(X["COW"],   class_of_worker_map)
+    if "SEX"   in X: X["SEX"]   = _map_if_numeric(X["SEX"],   sex_map)
+    if "SCHL"  in X: X["SCHL"]  = _map_if_numeric(X["SCHL"],  education_map)
+    if "RAC1P" in X: X["RAC1P"] = _map_if_numeric(X["RAC1P"], race_map)
+    if "TEN"   in X: X["TEN"]   = _map_if_numeric(X["TEN"],   tenure_map)
+    if "BLD"   in X: X["BLD"]   = _map_if_numeric(X["BLD"],   building_map)
+    if "HUPAC" in X: X["HUPAC"] = _map_if_numeric(X["HUPAC"], children_map)
+    if "VEH"   in X: X["VEH"]   = _map_if_numeric(X["VEH"],   vehicle_map)
+    X.drop(columns=["ST"], errors="ignore", inplace=True)
+    for c in NUMERIC_COLUMNS:
+        if c in X:
+            X[c] = pd.to_numeric(X[c], errors="coerce")
+    # simple imputations (match your original)
+    obj_cols = X.select_dtypes(include="object").columns
+    for c in obj_cols:
+        mode = X[c].mode(dropna=True)
+        X[c] = X[c].fillna(mode.iloc[0] if not mode.empty else "Unknown")
+    num_cols = X.select_dtypes(include=[np.number]).columns
+    for c in num_cols:
+        med = X[c].median()
+        X[c] = X[c].fillna(0 if pd.isna(med) else med)
+    return X
+# ------------------ END PREPROCESSING ------------------
+
 BASE_DIR = Path(__file__).resolve().parent
 PIPE_PATH = BASE_DIR / "model" / "income_pipeline.pkl"
 THRESHOLD_PATH = BASE_DIR / "model" / "threshold.txt"
 
 pipeline = None
 last_load_error = None
-
-# Use file or env for threshold (defaults to 0.5)
-def load_threshold():
-    env_thr = os.getenv("THRESHOLD")
-    if env_thr:
-        try:
-            return float(env_thr)
-        except ValueError:
-            pass
-    if THRESHOLD_PATH.exists():
-        try:
-            return float(THRESHOLD_PATH.read_text().strip())
-        except ValueError:
-            pass
-    return 0.5
-
-DECISION_THRESHOLD = load_threshold()
-
 def get_pipeline():
-    """Lazy-load the trained pipeline, capture first error for /health."""
     global pipeline, last_load_error
-    if pipeline is not None:
-        return pipeline
-    try:
-        pipeline = joblib.load(PIPE_PATH)
-        last_load_error = None
-    except Exception as e1:
-        if cp is not None:
-            try:
-                with open(PIPE_PATH, "rb") as f:
-                    pipeline = cp.load(f)
-                    last_load_error = None
-            except Exception as e2:
-                pipeline = None
-                last_load_error = f"joblib: {repr(e1)} | cloudpickle: {repr(e2)}"
-                app.logger.exception(f"Failed to load pipeline from {PIPE_PATH}")
-                raise
-        else:
+    if pipeline is None:
+        try:
+            pipeline = joblib.load(PIPE_PATH)
+            last_load_error = None
+        except Exception as e:
             pipeline = None
-            last_load_error = repr(e1)
+            last_load_error = repr(e)
             app.logger.exception(f"Failed to load pipeline from {PIPE_PATH}")
             raise
     return pipeline
 
-# Contracts
-REQUIRED_COLUMNS = [
-    "TEN","RAC1P","CIT","SCHL","BLD","HUPAC","COW","MAR","SEX","VEH","WKL",
-    "AGEP","NPF","GRPIP","WKHP"
-]
-NUMERIC_COLUMNS = ["AGEP","NPF","GRPIP","WKHP"]
+def load_threshold():
+    if THRESHOLD_PATH.exists():
+        try:
+            return float(THRESHOLD_PATH.read_text().strip())
+        except Exception:
+            pass
+    return 0.6648  # your original working threshold
 
 @app.route("/", methods=["GET"])
 def home():
@@ -92,7 +119,7 @@ def home():
 def health():
     try:
         get_pipeline()
-        return jsonify(status="ok", model_path=str(PIPE_PATH), threshold=DECISION_THRESHOLD), 200
+        return jsonify(status="ok", model_path=str(PIPE_PATH), threshold=load_threshold()), 200
     except Exception:
         return jsonify(status="pipeline_not_loaded", model_path=str(PIPE_PATH), error=last_load_error), 500
 
@@ -127,7 +154,7 @@ def predict():
 
     try:
         probs = pl.predict_proba(df)[:, 1]
-        thr = DECISION_THRESHOLD
+        thr = load_threshold()
         preds = (probs >= thr).astype(int)
     except Exception as e:
         return jsonify(error=f"Inference failed: {e}"), 500
@@ -154,5 +181,5 @@ def predict():
     return jsonify(results), 200
 
 if __name__ == "__main__":
-    # REQUIRED for Render
+    # IMPORTANT for Render
     app.run(host="0.0.0.0", port=int(os.getenv("PORT", 5000)), debug=False)
