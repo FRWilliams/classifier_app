@@ -36,3 +36,4 @@ build/
 !model/income_pipeline.pkl 
 *.joblib
 
+-e "\n!model/income_pipeline.pkl\n!model/threshold.txt" 
