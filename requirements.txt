@@ -1,20 +1,13 @@
-# Build tools first (fixes setuptools.build_meta error)
+# build tools first
 pip==25.2
 setuptools==72.2.0
 wheel==0.44.0
 
-# Web
 Flask==3.0.3
 gunicorn==22.0.0
 
-# Core ML stack
 numpy==1.26.4
 pandas==2.2.2
 scikit-learn==1.5.1
 xgboost==2.1.1
 joblib==1.4.2
-cloudpickle==3.0.0
-requests==2.32.3
-
-# Optional (only if you enabled CORS)
-# flask-cors==4.0.1

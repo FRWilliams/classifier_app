@@ -33,7 +33,9 @@ build/
 
 # Model artifacts
 *.pkl
-!model/income_pipeline.pkl 
+!model/
+!model/income_pipeline.pkl
+!model/threshold.txt
 *.joblib
 
 -e "\n!model/income_pipeline.pkl\n!model/threshold.txt" 
